@@ -1,0 +1,351 @@
+Subject: [PATCH] Starter code for homework
+---
+Index: app/Http/Kernel.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/Http/Kernel.php b/app/Http/Kernel.php
+--- a/app/Http/Kernel.php	(revision b537ae1c2dca0458e2b7b517ae0ad5bba2b6b475)
++++ b/app/Http/Kernel.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -2,6 +2,7 @@
+ 
+ namespace App\Http;
+ 
++use App\Http\Middleware\StartSession;
+ use Illuminate\Foundation\Http\Kernel as HttpKernel;
+ 
+ class Kernel extends HttpKernel
+@@ -36,6 +37,7 @@
+             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+             \App\Http\Middleware\VerifyCsrfToken::class,
+             \Illuminate\Routing\Middleware\SubstituteBindings::class,
++            StartSession::class,
+         ],
+ 
+         'api' => [
+Index: app/Http/Middleware/StartSession.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/Http/Middleware/StartSession.php b/app/Http/Middleware/StartSession.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/app/Http/Middleware/StartSession.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,53 @@
++<?php
++
++namespace App\Http\Middleware;
++
++use App\Models\Session;
++use Closure;
++use Illuminate\Contracts\Foundation\Application;
++use Illuminate\Contracts\Session\Session as SessionContract;
++use Illuminate\Http\Request;
++use Symfony\Component\HttpFoundation\Response;
++
++class StartSession
++{
++    private const DB_SESSION_ID_KEY = 'db_session_id';
++
++    public function __construct(
++        private readonly Application $app,
++        private readonly SessionContract $sessionManager,
++    ) {
++    }
++
++    /**
++     * Handle an incoming request.
++     *
++     * @param  Closure(Request): (Response)  $next
++     */
++    public function handle(Request $request, Closure $next): Response
++    {
++        $session = null;
++
++        if ($this->sessionManager->has(self::DB_SESSION_ID_KEY)) {
++            $sessionIdForDb = $this->sessionManager->get(self::DB_SESSION_ID_KEY);
++            $session = Session::query()->find($sessionIdForDb);
++        }
++
++        if ($session === null) {
++            $session = new Session();
++            $session->save();
++            $this->sessionManager->put(self::DB_SESSION_ID_KEY, $session->id);
++        }
++
++        $this->app->instance(Session::class, $session);
++
++        if ($request->getMethod() === 'GET' && ! $request->isXmlHttpRequest()) {
++            $session->events()->create([
++                'url' => url($request->path()),
++                'type' => 'pageview',
++            ]);
++        }
++
++        return $next($request);
++    }
++}
+Index: app/Models/Event.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/Models/Event.php b/app/Models/Event.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/app/Models/Event.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,39 @@
++<?php
++
++namespace App\Models;
++
++use Illuminate\Database\Eloquent\Factories\HasFactory;
++use Illuminate\Database\Eloquent\Model;
++use Illuminate\Database\Eloquent\Relations\BelongsTo;
++use Illuminate\Support\Carbon;
++
++/**
++ * @property int $id
++ * @property int $session_id
++ * @property string $url
++ * @property string $type
++ * @property array<string, mixed> $data
++ * @property Carbon $created_at
++ * @property Carbon $updated_at
++ * @property-read Session $session
++ */
++class Event extends Model
++{
++    use HasFactory;
++
++    /**
++     * @var array<string, string>
++     */
++    protected $casts = [
++        'session_id' => 'integer',
++        'data' => 'array',
++    ];
++
++    /**
++     * @return BelongsTo<Session, Event>
++     */
++    public function session(): BelongsTo
++    {
++        return $this->belongsTo(Session::class);
++    }
++}
+Index: app/Models/Session.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/Models/Session.php b/app/Models/Session.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/app/Models/Session.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,28 @@
++<?php
++
++namespace App\Models;
++
++use Illuminate\Database\Eloquent\Collection as EloquentCollection;
++use Illuminate\Database\Eloquent\Factories\HasFactory;
++use Illuminate\Database\Eloquent\Model;
++use Illuminate\Database\Eloquent\Relations\HasMany;
++use Illuminate\Support\Carbon;
++
++/**
++ * @property int $id
++ * @property Carbon $created_at
++ * @property Carbon $updated_at
++ * @property-read EloquentCollection<int, Event> $events
++ */
++class Session extends Model
++{
++    use HasFactory;
++
++    /**
++     * @return HasMany<Event>
++     */
++    public function events(): HasMany
++    {
++        return $this->hasMany(Event::class);
++    }
++}
+Index: app/Providers/AppServiceProvider.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/Providers/AppServiceProvider.php b/app/Providers/AppServiceProvider.php
+--- a/app/Providers/AppServiceProvider.php	(revision b537ae1c2dca0458e2b7b517ae0ad5bba2b6b475)
++++ b/app/Providers/AppServiceProvider.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -2,6 +2,7 @@
+ 
+ namespace App\Providers;
+ 
++use Illuminate\Database\Eloquent\Model;
+ use Illuminate\Support\ServiceProvider;
+ 
+ class AppServiceProvider extends ServiceProvider
+@@ -19,6 +20,6 @@
+      */
+     public function boot(): void
+     {
+-        //
++        Model::unguard();
+     }
+ }
+Index: database/factories/EventFactory.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/database/factories/EventFactory.php b/database/factories/EventFactory.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/database/factories/EventFactory.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,28 @@
++<?php
++
++namespace Database\Factories;
++
++use App\Models\Event;
++use App\Models\Session;
++use Illuminate\Database\Eloquent\Factories\Factory;
++
++/**
++ * @extends Factory<Event>
++ */
++class EventFactory extends Factory
++{
++    /**
++     * Define the model's default state.
++     *
++     * @return array<string, mixed>
++     */
++    public function definition(): array
++    {
++        return [
++            'session_id' => Session::factory(),
++            'url' => fake()->url(),
++            'type' => fake()->word(),
++            'data' => ['key' => 'value'],
++        ];
++    }
++}
+Index: database/factories/SessionFactory.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/database/factories/SessionFactory.php b/database/factories/SessionFactory.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/database/factories/SessionFactory.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,24 @@
++<?php
++
++namespace Database\Factories;
++
++use App\Models\Session;
++use Illuminate\Database\Eloquent\Factories\Factory;
++
++/**
++ * @extends Factory<Session>
++ */
++class SessionFactory extends Factory
++{
++    /**
++     * Define the model's default state.
++     *
++     * @return array<string, mixed>
++     */
++    public function definition(): array
++    {
++        return [
++            //
++        ];
++    }
++}
+Index: database/migrations/2024_01_17_105322_create_sessions_table.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/database/migrations/2024_01_17_105322_create_sessions_table.php b/database/migrations/2024_01_17_105322_create_sessions_table.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/database/migrations/2024_01_17_105322_create_sessions_table.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,27 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    /**
++     * Run the migrations.
++     */
++    public function up(): void
++    {
++        Schema::create('sessions', function (Blueprint $table) {
++            $table->id();
++            $table->timestamps();
++        });
++    }
++
++    /**
++     * Reverse the migrations.
++     */
++    public function down(): void
++    {
++        Schema::dropIfExists('sessions');
++    }
++};
+Index: database/migrations/2024_01_17_123425_create_events_table.php
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/database/migrations/2024_01_17_123425_create_events_table.php b/database/migrations/2024_01_17_123425_create_events_table.php
+new file mode 100644
+--- /dev/null	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
++++ b/database/migrations/2024_01_17_123425_create_events_table.php	(revision 5ab89042331b0e6da10429242d9a2538c8d9a1cf)
+@@ -0,0 +1,32 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Query\Expression;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    /**
++     * Run the migrations.
++     */
++    public function up(): void
++    {
++        Schema::create('events', function (Blueprint $table) {
++            $table->id();
++            $table->foreignId('session_id')->constrained()->cascadeOnDelete();
++            $table->string('url');
++            $table->string('type');
++            $table->json('data')->default(new Expression('(JSON_OBJECT())'));
++            $table->timestamps();
++        });
++    }
++
++    /**
++     * Reverse the migrations.
++     */
++    public function down(): void
++    {
++        Schema::dropIfExists('events');
++    }
++};
